@@ -102,6 +102,7 @@ data_readmin$days_since = data_readmin$admit_date- first_day
 data_readmin$days_since <- as.integer(data_readmin$days_since)
 ############################Fit Cox Proportional Model###########################################
 #Create a survival object, outcome== 1 is unplanned readmission
+surv <- Surv(data_readmin$days_since,  data_readmin$outcome == 1)
 data_readmin$SurvObj <- with(data_readmin, Surv(days_since,  outcome == 1))
 
 ## Fit Cox regression
@@ -130,9 +131,7 @@ data_readmin$readmin_times <- as.integer(data_readmin$readmin_times)
 data_readmin$age <- as.integer(data_readmin$age)
 class(data_readmin$prncpl_category)
 
-res.cox1 <- coxph(SurvObj ~ dschrg_cd      + prcdr_cnt +
-                   +diabetes+sex_cd+hyperten+chf+cad+smoking
-                  + age +  median_income + readmin_days+readmin_times, data =  data_readmin)
+res.cox1 <- coxph(SurvObj ~ ., data =  data_readmin)
 res.cox1
 summary(res.cox1)
 
@@ -161,3 +160,108 @@ res.cox2
 summary(res.cox2)
 
 anova(res.cox1,res.cox2)
+
+
+#Prediction
+pred <- predict(res.cox2, data_readmin)
+survConcordance(surv ~ predict(res.cox2))
+
+
+#Setting up trainning set and testing set
+set.seed(123456)
+smp_size <- floor(0.75 * nrow(data_readmin))
+train_ind <- sample(seq_len(nrow(data_readmin)), size = smp_size)
+train <- data_readmin[train_ind, ]
+test <- data_readmin[-train_ind, ]
+
+#Fitting
+res.cox2.split <- coxph(SurvObj ~ dschrg_cd      + prcdr_cnt +
+                          +diabetes+sex_cd+hyperten+chf+cad+smoking
+                        + age +  median_income + readmin_days+readmin_times + prncpl_category, data =  train)
+summary(res.cox2.split)
+pred <- predict(res.cox2.split, test)
+survConcordance(test$SurvObj ~ pred)
+
+res.cox1.split <- coxph(SurvObj ~ dschrg_cd      + prcdr_cnt +
+                    +diabetes+sex_cd+hyperten+chf+cad+smoking
+                  + age +  median_income + readmin_days+readmin_times, data =  train)
+summary(res.cox1.split)
+pred <- predict(res.cox1.split, test)
+(survConcordance(test$SurvObj ~ pred))
+
+
+#Cross validation k = 10, model 1
+set.seed(1000)
+k = floor(nrow(data_readmin)/10*9)
+CI_test <- c()
+
+for (i in (1:10)){
+  train_ind <- sample((nrow(data_readmin)), size = k)
+  train <- data_readmin[train_ind, ]
+  test <- data_readmin[-train_ind, ]
+  
+  #Fitting
+  res.cox2.split <- coxph(SurvObj ~ dschrg_cd      + prcdr_cnt +
+                            +diabetes+sex_cd+hyperten+chf+cad+smoking
+                          + age +  median_income + readmin_days+readmin_times + prncpl_category, data =  train)
+ 
+  pred <- predict(res.cox2.split, test)
+  print("Fold 1")
+  print(survConcordance(test$SurvObj ~ pred))
+  CI_test <- c(CI_test,survConcordance(test$SurvObj ~ pred)$concordance)
+  
+}
+
+mean(CI_test)
+
+
+#Cross validation k = 10, model 2
+set.seed(1000)
+k = nrow(data_readmin)/10*9
+CI_test <- c()
+
+for (i in (1:10)){
+  train_ind <- sample((nrow(data_readmin)), size = k)
+  train <- data_readmin[train_ind, ]
+  test <- data_readmin[-train_ind, ]
+  
+  #Fitting
+  res.cox1.split <- coxph(SurvObj ~ dschrg_cd      + prcdr_cnt +
+                            +diabetes+sex_cd+hyperten+chf+cad+smoking
+                          + age +  median_income + readmin_days+readmin_times, data =  train)
+  pred <- predict(res.cox1.split, test)
+  print("Fold 1")
+  print(survConcordance(test$SurvObj ~ pred))
+  CI_test <- c(CI_test,survConcordance(test$SurvObj ~ pred)$concordance)
+  
+}
+
+mean(CI_test)
+
+cox.step <- step(res.cox2)
+
+
+
+#Cross validation k = 10, step model
+set.seed(1000)
+k = nrow(data_readmin)/10*9
+CI_test <- c()
+
+for (i in (1:10)){
+  train_ind <- sample((nrow(data_readmin)), size = k)
+  train <- data_readmin[train_ind, ]
+  test <- data_readmin[-train_ind, ]
+  
+  #Fitting
+  cox.step <- coxph(SurvObj ~ dschrg_cd + prcdr_cnt + diabetes + sex_cd + hyperten + 
+                      chf + cad + smoking + age + readmin_days + readmin_times, data =  train)
+  pred <- predict(cox.step, test)
+  print("Fold 1 - step model")
+  print(survConcordance(test$SurvObj ~ pred))
+  CI_test <- c(CI_test,survConcordance(test$SurvObj ~ pred)$concordance)
+  
+}
+
+mean(CI_test)
+
+####################Comparing to random survival forest model####################
